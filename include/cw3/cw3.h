@@ -78,6 +78,62 @@
 class CW3
 {
   public:
+ 
+    /** \brief Structure to hold collision box information */
+    struct Box {
+
+      double x, y, z;
+      double roll, pitch, yaw;
+      double length;
+      double width;
+      double height;
+
+      // constructor
+      Box(double x, double y, double z, double roll, double pitch, double yaw,
+          double length, double width, double height)
+          : x(x), y(y), z(z), roll(roll), pitch(pitch), yaw(yaw),
+            length(length), width(width), height(height) {}
+    };
+
+    /** \brief Structure to hold table information */
+    struct Table {
+
+      // table position parameters
+      double x,y,z;
+      double roll,pitch,yaw;
+
+      // constants that determine table sizes
+      static constexpr double table_length = 0.4;
+      static constexpr double table_height = 0.4;
+      static constexpr double table_width = 0.2;
+      static constexpr double wall_thickness = 0.05;
+      static constexpr double shelf_height = 0.3;
+
+      // does this table have a shelf on top
+      bool shelf;
+
+      // create boxes for the table and shelf
+      Box base{x, y, z + table_height/2,
+        roll, pitch, yaw,
+        table_length, table_width, table_height};
+
+      Box left{-table_length/2 + wall_thickness/2, 0, table_height/2 + shelf_height/2,
+        roll, pitch, yaw,
+        wall_thickness, table_width, shelf_height};
+
+      Box right{table_length/2 - wall_thickness/2, 0, table_height/2 + shelf_height/2,
+        roll, pitch, yaw,
+        wall_thickness, table_width, shelf_height};
+
+      Box top{0, 0, table_height/2 + shelf_height - wall_thickness/2,
+        roll, pitch, yaw,
+        table_length, table_width, wall_thickness};
+
+      // constructor
+      Table(double x, double y, double z, double roll, double pitch, double yaw, bool shelf)
+        : x(x), y(y), z(z), roll(roll), pitch(pitch), yaw(yaw), shelf(shelf) {}
+    };
+ 
     /** \brief Empty constructor.
       *
       * \input[in] nh the ROS node
@@ -125,21 +181,24 @@ class CW3
     int
     kbhit ();
     
-    /** \brief CW1 Q2: makes collision object box
+    /** \brief helper function to create a collision object
       *
-      * \input id name of identifier
-      * \input frame name of frame_id
-      * \input dim_x box dimensions along x
-      * \input dim_y box dimensions along y
-      * \input dim_z box dimensions along z
-      * \input pos_x centre of box along x
-      * \input pos_y centre of box along y
-      * \input pos_z centre of box along z
+      * \input id name of the collision object
+      * \input frame_id base frame of the collision object
+      * \input box structure containing details of the collision object
       */
     moveit_msgs::CollisionObject
-    cw1Q3MakeBox(std::string id, std::string frame_id,
-                        float dim_x, float dim_y, float dim_z,
-                        float pos_x, float pos_y, float pos_z);
+    makeBox(std::string id, std::string frame_id, Box box);
+    
+    /** \brief helper function to create a table in the scene
+      * \input id name of the collision object
+      * \input frame_id base frame of the collision object
+      * \input table structure containing details of the table object
+      * \input collision_objects vector of collision objects which is added to
+      */
+    void
+    makeTable(std::string id, std::string frame_id, Table table,
+      std::vector<moveit_msgs::CollisionObject>& collision_objects);
 
     /** \brief CW1 Q2: add collision objects: table1, table2, table3, object
       *
@@ -159,7 +218,12 @@ class CW3
     tf::Transform transf_;
     
     /** \brief Lab 1: TF transform broadcaster definitions. */
-    tf::TransformBroadcaster tranf_br_; 
+    tf::TransformBroadcaster tranf_br_;
+ 
+    /** \brief create the tables at specific positions and orientations. */
+    Table table_1_{ 0.1,  0.6,  0, 0, 0, 0,      false};
+    Table table_2_{-0.5,  0.25, 0, 0, 0, 1.5708, true};
+    Table table_3_{-0.4, -0.4,  0, 0, 0, 2.3562, true}; 
     
   protected:
     /** \brief Debug mode. */

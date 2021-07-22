@@ -135,34 +135,100 @@ CW3::Lab1PublishFrames ()
 
 ////////////////////////////////////////////////////////////////////////////////
 moveit_msgs::CollisionObject
-CW3::cw1Q3MakeBox(std::string id, std::string frame_id,
-					float dim_x, float dim_y, float dim_z,
-					float pos_x, float pos_y, float pos_z)
+CW3::makeBox(std::string id, std::string frame_id, Box box)
 {
   // Makes a Box collision object at given location with given dimensions. 
 
   moveit_msgs::CollisionObject collision_object;
   
-  // Add the first table where the cube will originally be kept.
+  // input header information
   collision_object.id = id;
   collision_object.header.frame_id = frame_id;
-  
+
   /* Define the primitive and its dimensions. */
   collision_object.primitives.resize(1);
   collision_object.primitives[0].type = collision_object.primitives[0].BOX;
   collision_object.primitives[0].dimensions.resize(3);
-  collision_object.primitives[0].dimensions[0] = dim_x;
-  collision_object.primitives[0].dimensions[1] = dim_y;
-  collision_object.primitives[0].dimensions[2] = dim_z;
+  collision_object.primitives[0].dimensions[0] = box.length;
+  collision_object.primitives[0].dimensions[1] = box.width;
+  collision_object.primitives[0].dimensions[2] = box.height;
 
+  // determine orientation
+  tf::Quaternion q;
+  geometry_msgs::Quaternion q_msg;
+  q.setRPY(box.roll, box.pitch, box.yaw);
+  tf::quaternionTFToMsg (q, q_msg);
+  
   /* Define the pose of the table: center of the cube. */
   collision_object.primitive_poses.resize(1);
-  collision_object.primitive_poses[0].position.x =  pos_x;
-  collision_object.primitive_poses[0].position.y =  pos_y;
-  collision_object.primitive_poses[0].position.z =  pos_z;
+  collision_object.primitive_poses[0].position.x =  box.x;
+  collision_object.primitive_poses[0].position.y =  box.y;
+  collision_object.primitive_poses[0].position.z =  box.z;
+  collision_object.primitive_poses[0].orientation = q_msg;
 
   collision_object.operation = collision_object.ADD;
   return collision_object;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+void
+CW3::makeTable(std::string id, std::string frame_id, Table table,
+  std::vector<moveit_msgs::CollisionObject>& collision_objects)
+{
+  // Makes a Box collision object at given location with given dimensions. 
+
+  // inspect the incoming vector (passed by reference)
+  int i = collision_objects.size();
+
+  // extend collision object vector by number of boxes required
+  if (table.shelf) 
+  {
+    collision_objects.resize(i + 4);
+  }
+  else 
+  {
+    collision_objects.resize(i + 1);
+  }
+
+  // create the base of the table
+  collision_objects[i] = makeBox (id, frame_id, table.base);
+
+  // if we have a shelf, create this
+  if (table.shelf)
+  {
+
+    /* First, we need to rotate the shelf elements to correct orientation */
+    Eigen::Matrix3d rotation_matrix;
+
+    // generate the correct rotation matrix for this table
+    rotation_matrix = Eigen::AngleAxisd (table.roll, Eigen::Vector3d::UnitX())
+        * Eigen::AngleAxisd (table.pitch, Eigen::Vector3d::UnitY())
+        * Eigen::AngleAxisd (table.yaw, Eigen::Vector3d::UnitZ());
+
+    // create unit vectors and rotate them
+    Eigen::Vector3d left_eigen(table.left.x, table.left.y, table.left.z);
+    Eigen::Vector3d right_eigen(table.right.x, table.right.y, table.right.z);
+    left_eigen = rotation_matrix * left_eigen;
+    right_eigen = rotation_matrix * right_eigen;
+
+    // save the rotated co-ordinates, then add in the table base position
+    table.left.x = left_eigen(0) + table.base.x;
+    table.left.y = left_eigen(1) + table.base.y;
+    table.left.z = left_eigen(2) + table.base.z;
+
+    table.right.x = right_eigen(0) + table.base.x;
+    table.right.y = right_eigen(1) + table.base.y;
+    table.right.z = right_eigen(2) + table.base.z;
+
+    table.top.x += table.base.x;
+    table.top.y += table.base.y;
+    table.top.z += table.base.z;
+
+    // make the shelf collision objects, adding them to the vector
+    collision_objects[i+1] = makeBox (id + "_left", frame_id, table.left);
+    collision_objects[i+2] = makeBox (id + "_right", frame_id, table.right);
+    collision_objects[i+3] = makeBox (id + "_top", frame_id, table.top);
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -172,29 +238,19 @@ CW3::cw1Q3AddColObj (moveit::planning_interface::PlanningSceneInterface&
 {
   // Creating Environment
   // ^^^^^^^^^^^^^^^^^^^^
-  // Create vector to hold 4 collision objects.
+  // Create vector to hold collision objects.
   std::vector<moveit_msgs::CollisionObject> collision_objects;
-  collision_objects.resize(4);
-  
-  // Add the first table where the cube will originally be kept.
-  collision_objects[0] = CW3::cw1Q3MakeBox("table1", "panda_link0",
-                                            0.4, 0.2, 0.4,
-                                            0.0, 0.5, 0.2);
-  
-  // Add the second table where we will be placing the cube.
-  collision_objects[1] = CW3::cw1Q3MakeBox("table2", "panda_link0",
-                                            0.2, 0.4, 0.4,
-					    -0.5, 0.0, 0.2);
-  
-  // Add the second table where we will be placing the cube.
-  collision_objects[2] = CW3::cw1Q3MakeBox("table3", "panda_link0",
-                                            0.4, 0.2, 0.4,
-                                            0.0, -0.5, 0.2);
 
-  // Define the object that we will be manipulating
-  collision_objects[3] = CW3::cw1Q3MakeBox("object", "panda_link0",
-                                            0.02, 0.02, 0.2,
-                                            -0.5, 0.0, 0.5);
+  makeTable ("table1", "panda_link0", table_1_, collision_objects);
+  makeTable ("table2", "panda_link0", table_2_, collision_objects);
+  makeTable ("table3", "panda_link0", table_3_, collision_objects);
 
-  planning_scene_interface.applyCollisionObjects(collision_objects);
+  // create the object
+  Box object_box {table_2_.x, table_2_.y, table_2_.table_height + 0.1,
+                  0, 0, 0,
+                  0.02, 0.02, 0.2};
+
+  collision_objects.push_back (makeBox ("object", "panda_link0", object_box));
+
+  planning_scene_interface.applyCollisionObjects (collision_objects);
 }

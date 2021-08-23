@@ -92,7 +92,9 @@ main (int argc, char** argv)
   ros::Publisher pub_vg_key = nh.advertise<std_msgs::Float64>("/vg_filter", 0);
   // Publish CB Fillter switch
   ros::Publisher pub_cb_key = nh.advertise<std_msgs::Float64>("/cb_filter", 0);
-  
+  // Publish SOR Fillter switch
+  ros::Publisher pub_sor_key = nh.advertise<std_msgs::Float64>("/sor_filter", 0);
+
   // MoveIt! operates on sets of joints called "planning groups" and stores
   // them in an object called the `JointModelGroup`. Throughout MoveIt! the
   // terms "planning group" and "joint model group" are used interchangably.
@@ -131,6 +133,14 @@ main (int argc, char** argv)
         msg_cb_switch.data = 0;
         pub_cb_key.publish(msg_cb_switch);
       }
+      if (ch == 's') // if s is pressed
+      {
+        ROS_INFO_STREAM ("The Key 's' pressed");
+        std_msgs::Float64 msg_sor_switch;
+        msg_sor_switch.data = 0;
+        pub_sor_key.publish(msg_sor_switch);
+      }
+      
 
     }
 

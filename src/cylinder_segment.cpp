@@ -51,6 +51,7 @@
 // Filters
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/crop_box.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit_msgs/CollisionObject.h>
@@ -103,6 +104,10 @@ public:
     //subscriber 'c' button to switch CropBox filter.
     ros::Subscriber sub_cb_key = nh.subscribe("/cb_filter", 1,
                             &CylinderSegment::switch_cb_flag, this);
+    //subscriber 's' button to switch statistic outliers filter.
+    ros::Subscriber sub_sor_key = nh.subscribe("/sor_filter", 1,
+                            &CylinderSegment::switch_sor_flag, this);
+                        
     //Chech grasp states
     ros::Subscriber sub_grasp_states = nh.subscribe("/grasp_status", 1, 
                         &CylinderSegment::set_grasp_status, this); 
@@ -311,21 +316,24 @@ public:
   /** \brief Given a pointcloud apply the voxel grid filter.
     *
     * @param cloud - Pointcloud.
+    * @param vg_model - .
+    * @param large_leaf_size - .
+    * @param small_leaf_size - .
     */
   void voxelGridFilter (pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, 
                                                         bool vg_model, 
-                                                        float Large_leaf_size, 
-                                                        float Small_leaf_size)
+                                                        float large_leaf_size, 
+                                                        float small_leaf_size)
   {
     pcl::VoxelGrid<pcl::PointXYZRGB> vg;
     vg.setInputCloud (cloud);
     if (vg_model)
     {
-      vg.setLeafSize (Large_leaf_size, Small_leaf_size, Small_leaf_size);
+      vg.setLeafSize (large_leaf_size, small_leaf_size, small_leaf_size);
     }
     else
     {
-      vg.setLeafSize (Small_leaf_size, Small_leaf_size, Small_leaf_size);
+      vg.setLeafSize (small_leaf_size, small_leaf_size, small_leaf_size);
     }
     vg.filter(*cloud);
   }
@@ -333,7 +341,7 @@ public:
   /** \brief Given a pointcloud apply the voxel grid filter.
     *
     * @param cloud - Pointcloud.
-      @param box - outside box value.
+      @param box - include the maximum/minimum point of the box.
     */
   void cropBoxFilter (pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, 
                                            std::vector<double> box)
@@ -345,7 +353,24 @@ public:
     cb.setNegative(false);
     cb.filter(*cloud);
   }
-
+  /////////////////////////////////////////////////////////////////////////////
+  /** \brief Given a pointcloud remove the outliers based on statistic.
+    *
+    * @param cloud - Pointcloud.
+    * @param meanK - Number of nearest neighbors to use for mean 
+    *                distance estimation.
+    * @param sdm - standard deviation multiplier for the 
+    *                 distance threshold calculation.
+    */
+  void statOutilerRemovalFilter (pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud,
+                                int meanK, float sdm)
+  {
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZRGB> sor;
+    sor.setInputCloud (cloud);
+    sor.setMeanK (meanK);
+    sor.setStddevMulThresh (sdm);
+    sor.filter(*cloud);
+  }
   
   /////////////////////////////////////////////////////////////////////////////
   /** \brief Given the pointcloud and pointer cloud_normals compute the point
@@ -511,6 +536,14 @@ public:
                                 est_z - cdf_pred, est_z + cdf_pred};
       cropBoxFilter(cloud,cbfbox);
       std::cout << "Cloud Size After CBF: " << cloud->size() << std::endl;
+    }
+
+    if(sor_flag)
+    {
+      int meanK = 50;
+      float sdm = 1.0;
+      statOutilerRemovalFilter(cloud,meanK,sdm);
+      std::cout << "Cloud Size After SOR: " << cloud->size() << std::endl;
     }
     
     // Declare normals and call function to compute point normals.
@@ -702,12 +735,12 @@ public:
     if (vg_flag)
     {
       vg_flag = false;
-      std::cout<< "VG is OFF" << std::endl;
+      std::cout << "VG is OFF" << std::endl;
     }
     else
     {
       vg_flag = true;
-      std::cout<< "VG is ON" << std::endl;
+      std::cout << "VG is ON" << std::endl;
     }
     // Update segmentation/filtering
     update_sign = update_sign <= 1 ? 1 : update_sign;
@@ -718,14 +751,29 @@ public:
     if (cb_flag)
     {
       cb_flag = false;
-      std::cout<< "CB is OFF" << std::endl;
+      std::cout << "CB is OFF" << std::endl;
     }
     else
     {
       cb_flag = true;
-      std::cout<< "CB is ON" << std::endl;
+      std::cout << "CB is ON" << std::endl;
     }
     // Update segmentation/filtering
+    update_sign = update_sign <= 1 ? 1 : update_sign;
+  }
+  // Switch SOR
+  void switch_sor_flag (const std_msgs::Float64& input)
+  {
+    if(sor_flag)
+    {
+      sor_flag = false;
+      std::cout << "SOR is OFF" << std::endl;
+    }
+    else
+    {
+      sor_flag = true;
+      std::cout << "SOR is ON" << std::endl;
+    }
     update_sign = update_sign <= 1 ? 1 : update_sign;
   }
 
@@ -764,10 +812,11 @@ private:
   // Update signal
   int update_sign = 0;
   // VG Flag
-  bool vg_flag = true;
+  bool vg_flag = false;
   // CB Flag
-  bool cb_flag = true;
-
+  bool cb_flag = false;
+  // SOR Flag
+  bool sor_flag = false;
 
   // Transforms
   // T(0,cylinder) base to cylinder. At Begaining.

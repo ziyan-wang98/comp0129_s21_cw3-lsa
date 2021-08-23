@@ -45,6 +45,8 @@
 #include <tf/transform_listener.h>
 #include <visualization_msgs/Marker.h>
 
+#include <std_msgs/Float64.h>
+
 ///////////////////////////////////////////////////////////////////////////////
 int
 main (int argc, char** argv)
@@ -85,6 +87,11 @@ main (int argc, char** argv)
   //Decleare a joint state publisher
   ros::Publisher joint_pub =
     nh.advertise<sensor_msgs::JointState>("/move_group/fake_controller_joint_states", 0);
+
+  // Publish VG Fillter switch
+  ros::Publisher pub_vg_key = nh.advertise<std_msgs::Float64>("/vg_filter", 0);
+  // Publish CB Fillter switch
+  ros::Publisher pub_cb_key = nh.advertise<std_msgs::Float64>("/cb_filter", 0);
   
   // MoveIt! operates on sets of joints called "planning groups" and stores
   // them in an object called the `JointModelGroup`. Throughout MoveIt! the
@@ -110,9 +117,21 @@ main (int argc, char** argv)
     if (cw3_obj.kbhit()) // check if a key is pressed without blocking the while
     {
       int ch = getchar();
-      if (ch == 'h') // if h is pressed
+      if (ch == 'v') // if v is pressed
       {
+        ROS_INFO_STREAM ("The Key 'v' pressed");
+        std_msgs::Float64 msg_vg_switch;
+        msg_vg_switch.data = 0;
+        pub_vg_key.publish(msg_vg_switch);
       }
+      if (ch == 'c') // if c is pressed
+      {
+        ROS_INFO_STREAM ("The Key 'c' pressed");
+        std_msgs::Float64 msg_cb_switch;
+        msg_cb_switch.data = 0;
+        pub_cb_key.publish(msg_cb_switch);
+      }
+
     }
 
     ros::spinOnce();

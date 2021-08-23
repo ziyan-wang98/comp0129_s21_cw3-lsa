@@ -48,8 +48,17 @@
 #include <pcl/features/normal_3d.h>
 #include <pcl/segmentation/sac_segmentation.h>
 
+// Filters
+#include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/crop_box.h>
+
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit_msgs/CollisionObject.h>
+#include <std_msgs/Float64.h>
+#include <std_msgs/Bool.h>
+#include <tf/transform_listener.h>
+#include <geometry_msgs/PoseStamped.h>
+
 
 #define SHOW_FPS 1
 #if SHOW_FPS
@@ -85,6 +94,27 @@ public:
     // Initialize subscriber to the raw point cloud
     ros::Subscriber sub = nh.subscribe ("/camera/depth_registered/points", 1,
                                         &CylinderSegment::cloudCB, this);
+    
+    
+    // Subscriber:
+    //subscriber 'v' button to switch VoxelGrid filter.
+    ros::Subscriber sub_vg_key = nh.subscribe("/vg_filter", 1,
+                            &CylinderSegment::switch_vg_flag, this);
+    //subscriber 'c' button to switch CropBox filter.
+    ros::Subscriber sub_cb_key = nh.subscribe("/cb_filter", 1,
+                            &CylinderSegment::switch_cb_flag, this);
+    //Chech grasp states
+    ros::Subscriber sub_grasp_states = nh.subscribe("/grasp_status", 1, 
+                        &CylinderSegment::set_grasp_status, this); 
+
+    // Publisher:
+    //Pose Publisher
+    pub_cylinder_pose = nh.advertise<geometry_msgs::PoseStamped>("/cylinder_pose", 1, true);
+    //Radius Publisher
+    pub_cylinder_radius = nh.advertise<std_msgs::Float64>("/cylinder_radius", 1, true);
+    //Height Publisher
+    pub_cylinder_height = nh.advertise<std_msgs::Float64>("/cylinder_height", 1, true);
+
     // Spin
     ros::spin ();
   }
@@ -143,8 +173,58 @@ public:
     collision_object.operation = collision_object.ADD;
     planning_scene_interface.applyCollisionObject(collision_object);
     // END_SUB_TUTORIAL
+    
+    // Publish Pose
+    publishPose(cylinder_pose);
+    // Publish Radius and Height
+    std_msgs::Float64 radius_msg, height_msg;
+    radius_msg.data = cylinder_params->radius;
+    height_msg.data = cylinder_params->height;
+    pub_cylinder_radius.publish(radius_msg);
+    pub_cylinder_height.publish(height_msg);
   }
+  /////////////////////////////////////////////////////////////////////////////
+  /** \brief Given the pose of the cylinder and publish it by publisher.
+    *
+    * @param cylinder_pose - Pointer to the Pose(position and orientation).
+    */
   
+  void publishPose (geometry_msgs::Pose cylinder_pose)
+  {
+    
+    // Position
+    tf::Vector3 p;
+    p.setX(cylinder_pose.position.x);
+    p.setY(cylinder_pose.position.y);
+    p.setZ(cylinder_pose.position.z);
+    // Orientation
+    tf::Quaternion q;
+    q.setX(cylinder_pose.orientation.x);
+    q.setY(cylinder_pose.orientation.y);
+    q.setZ(cylinder_pose.orientation.z);
+    q.setW(cylinder_pose.orientation.w);
+
+    // cylinder transform to camera frame
+    tf::StampedTransform Trans_C2C;
+    Trans_C2C.setRotation(q);
+    Trans_C2C.setOrigin(p);
+    transformListener.lookupTransform("/panda_link0", "/camera_rgb_optical_frame",
+                                                     ros::Time(0), Trans_C2B);
+    Trans_C2B.setData(Trans_C2B * Trans_C2C);
+
+    // Set pose message
+    geometry_msgs::PoseStamped cylinder_msg;
+    cylinder_msg.pose.position.x = Trans_C2B.getOrigin().getX();
+    cylinder_msg.pose.position.y = Trans_C2B.getOrigin().getY();
+    cylinder_msg.pose.position.z = Trans_C2B.getOrigin().getZ();
+    cylinder_msg.pose.orientation.x = Trans_C2B.getRotation().getX();
+    cylinder_msg.pose.orientation.y = Trans_C2B.getRotation().getY();
+    cylinder_msg.pose.orientation.z = Trans_C2B.getRotation().getZ();
+    cylinder_msg.pose.orientation.w = Trans_C2B.getRotation().getW();
+
+    pub_cylinder_pose.publish(cylinder_msg);
+  }
+
   /////////////////////////////////////////////////////////////////////////////
   /** \brief Given the pointcloud containing just the cylinder, compute its
     *        center point and its height and store in cylinder_params.
@@ -221,7 +301,51 @@ public:
     // min and max values in z axis to keep
     pass.setFilterLimits (0.3, 1.1); //TBD: hard-coded
     pass.filter (*cloud);
+
+    // CLoud Test Output
+    std::cout << "/////////////////////" << std::endl;
+    std::cout << "Cloud Size: " << cloud->size() << std::endl;
   }
+
+  /////////////////////////////////////////////////////////////////////////////
+  /** \brief Given a pointcloud apply the voxel grid filter.
+    *
+    * @param cloud - Pointcloud.
+    */
+  void voxelGridFilter (pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, 
+                                                        bool vg_model, 
+                                                        float Large_leaf_size, 
+                                                        float Small_leaf_size)
+  {
+    pcl::VoxelGrid<pcl::PointXYZRGB> vg;
+    vg.setInputCloud (cloud);
+    if (vg_model)
+    {
+      vg.setLeafSize (Large_leaf_size, Small_leaf_size, Small_leaf_size);
+    }
+    else
+    {
+      vg.setLeafSize (Small_leaf_size, Small_leaf_size, Small_leaf_size);
+    }
+    vg.filter(*cloud);
+  }
+  /////////////////////////////////////////////////////////////////////////////
+  /** \brief Given a pointcloud apply the voxel grid filter.
+    *
+    * @param cloud - Pointcloud.
+      @param box - outside box value.
+    */
+  void cropBoxFilter (pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud, 
+                                           std::vector<double> box)
+  {
+    pcl::CropBox<pcl::PointXYZRGB> cb;
+    cb.setInputCloud(cloud);
+    cb.setMin(Eigen::Vector4f(box[0], box[2], box[4], 1.0));
+    cb.setMax(Eigen::Vector4f(box[1], box[3], box[5], 1.0));
+    cb.setNegative(false);
+    cb.filter(*cloud);
+  }
+
   
   /////////////////////////////////////////////////////////////////////////////
   /** \brief Given the pointcloud and pointer cloud_normals compute the point
@@ -367,6 +491,27 @@ public:
     // just eliminates the point cloud values which do not lie in the user
     // specified range.
     passThroughFilter (cloud);
+
+    if(vg_flag)
+    {
+      float vg_large_leaf_size = 0.01;
+      float vg_small_leaf_size = 0.0075;
+      voxelGridFilter(cloud, 0 , vg_large_leaf_size, vg_small_leaf_size);
+      std::cout << "Cloud Size After VG: " << cloud->size() << std::endl;
+    }
+
+    if(cb_flag)
+    {
+      double est_x = -0.05;
+      double est_y = 0.16;
+      double est_z = 0.92;
+      double cdf_pred = 0.25;
+      std::vector<double> cbfbox = {est_x - cdf_pred, est_x + cdf_pred,
+                                est_y - cdf_pred, est_y + cdf_pred,
+                                est_z - cdf_pred, est_z + cdf_pred};
+      cropBoxFilter(cloud,cbfbox);
+      std::cout << "Cloud Size After CBF: " << cloud->size() << std::endl;
+    }
     
     // Declare normals and call function to compute point normals.
     pcl::PointCloud<pcl::Normal>::Ptr
@@ -411,6 +556,17 @@ public:
                               "Can't find the cylindrical component.");
       return;
     }
+    // Update point cloud
+    if (update_sign == 1)
+    {
+      std::vector<std::string> object_ids;
+      object_ids.push_back("cylinder");
+      moveit::planning_interface::PlanningSceneInterface planning_scene_interface;
+      planning_scene_interface.removeCollisionObjects(object_ids);
+      update_sign = 0;
+      points_not_found = true;
+    }
+    
     if (points_not_found)
     {
       // BEGIN_TUTORIAL
@@ -447,6 +603,130 @@ public:
       // END_TUTORIAL
       points_not_found = false;
     }
+    /* updating the position continuously */
+    else
+    {
+      // Update the cylinder pose when being grasped
+      if (grasped)
+      {
+        std::cout << "Cylinder is not grasped" << std::endl;
+        // Listen the Transform -> T(0,ee)
+        tf::TransformListener listener;
+        tf::StampedTransform Trans_E2B;
+        // According to http://wiki.ros.org/tf/Tutorials/
+        try{
+          transformListener.waitForTransform("/panda_link0", "/panda_hand",
+                                             ros::Time(0), ros::Duration(2.0));
+          transformListener.lookupTransform("/panda_link0", "/panda_hand",
+                                            ros::Time(0), Trans_E2B);
+        }catch(tf::TransformException& e){
+          ROS_ERROR("%s", e.what());
+          ros::Duration(1.0).sleep();
+        }
+        if (start_grasp)
+        {
+          std::cout << "Cylinder Finish grasping" << std::endl;
+          // T(0, cy)
+          tf::StampedTransform  Trans_E2B_inv; 
+          Trans_E2B_inv.setData(Trans_E2B.inverse());
+          Trans_C2E.setData(Trans_E2B_inv * Trans_C2B);
+          start_grasp = false;
+        }
+        update_publish_cylinder_pose(Trans_E2B,Trans_C2E);
+      }
+      else
+      {
+        std::cout << "Cylinder is being grasped" << std::endl;
+        start_grasp = true;
+        tf::StampedTransform  Trans_E2B_inv;
+        // Listen the Transform -> T(0,ee)
+        tf::TransformListener listener;
+        tf::StampedTransform Trans_E2B;
+        // According to http://wiki.ros.org/tf/Tutorials/
+        try{
+          transformListener.waitForTransform("/panda_link0", "/panda_hand",
+                                             ros::Time(0), ros::Duration(2.0));
+          transformListener.lookupTransform("/panda_link0", "/panda_hand",
+                                            ros::Time(0), Trans_E2B);
+        }catch(tf::TransformException& e){
+          ROS_ERROR("%s", e.what());
+          ros::Duration(1.0).sleep();
+        }
+        Trans_E2B_inv.setData(Trans_E2B.inverse());
+        Trans_C2E.setData(Trans_E2B_inv * Trans_C2B);
+        update_publish_cylinder_pose(Trans_E2B,Trans_C2E);
+      }
+    }
+  }
+
+  void update_publish_cylinder_pose(tf::StampedTransform Trans_E2B,
+                                    tf::StampedTransform Trans_C2E)
+  {
+      // T(0, cy) = T(0, ee) * T(ee, cy)
+      Trans_C2B.setData(Trans_E2B * Trans_C2E);
+      geometry_msgs::PoseStamped cylinder_msg;
+
+      //SetData
+      cylinder_msg.pose.position.x = Trans_C2B.getOrigin().getX();
+      cylinder_msg.pose.position.y = Trans_C2B.getOrigin().getY();
+      cylinder_msg.pose.position.z = Trans_C2B.getOrigin().getZ();
+      cylinder_msg.pose.orientation.x = Trans_C2B.getRotation().getX();
+      cylinder_msg.pose.orientation.y = Trans_C2B.getRotation().getY();
+      cylinder_msg.pose.orientation.z = Trans_C2B.getRotation().getZ();
+      cylinder_msg.pose.orientation.w = Trans_C2B.getRotation().getW();
+      //Output test
+      Output_cylinder_states(cylinder_msg);
+      //Publish 
+      pub_cylinder_pose.publish(cylinder_msg);
+  }
+
+  void Output_cylinder_states (geometry_msgs::PoseStamped cylinder_msg)
+  {
+    std::cout << "--------------" << std::endl;
+     std::cout << "Cylinder Position: " << std::endl
+              << "X: "<< cylinder_msg.pose.position.x<< std::endl
+              << "Y: "<< cylinder_msg.pose.position.y<< std::endl
+              << "Z: "<< cylinder_msg.pose.position.z<< std::endl;
+    std::cout << "--------------" << std::endl;
+  }
+    
+  void set_grasp_status (const std_msgs::Bool& input)
+  {
+    grasped = input.data;
+  }
+
+  // Cloud Filter Helper Function
+  // Switch VGF
+  void switch_vg_flag (const std_msgs::Float64& input)
+  {
+    if (vg_flag)
+    {
+      vg_flag = false;
+      std::cout<< "VG is OFF" << std::endl;
+    }
+    else
+    {
+      vg_flag = true;
+      std::cout<< "VG is ON" << std::endl;
+    }
+    // Update segmentation/filtering
+    update_sign = update_sign <= 1 ? 1 : update_sign;
+  }
+  // Switch CBF
+  void switch_cb_flag (const std_msgs::Float64& input)
+  {
+    if (cb_flag)
+    {
+      cb_flag = false;
+      std::cout<< "CB is OFF" << std::endl;
+    }
+    else
+    {
+      cb_flag = true;
+      std::cout<< "CB is ON" << std::endl;
+    }
+    // Update segmentation/filtering
+    update_sign = update_sign <= 1 ? 1 : update_sign;
   }
 
 private:
@@ -468,6 +748,32 @@ private:
   // from ModelCoefficients.
   AddCylinderParams* cylinder_params;
   // END_SUB_TUTORIAL
+
+  // Publishers
+  ros::Publisher pub_cylinder_pose;
+  ros::Publisher pub_cylinder_radius;
+  ros::Publisher pub_cylinder_height;
+  // Listener
+  tf::TransformListener transformListener;
+
+  // Flag
+  // grasping flag
+  bool grasped = true;
+  // start grasp flag
+  bool start_grasp = true;
+  // Update signal
+  int update_sign = 0;
+  // VG Flag
+  bool vg_flag = true;
+  // CB Flag
+  bool cb_flag = true;
+
+
+  // Transforms
+  // T(0,cylinder) base to cylinder. At Begaining.
+  tf::StampedTransform Trans_C2B;
+  // T(ee,cylinder) end-effector to cylinder. When Grasping.
+  tf::StampedTransform Trans_C2E;
 
   bool points_not_found = true;
 };
